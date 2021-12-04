@@ -1,0 +1,579 @@
+---
+title: "Cumulative analysis on the history of Olympics using R"
+output:
+  pdf_document: default
+  word_document: default
+  html_document: default
+always_allow_html: true
+---
+
+* * *
+
+## Dataset Description
+
+# Name of the Dataset
+120 years of Olympic history: athletes and results
+
+# Description of the fields
+basic bio data on athletes and medal results from Athens 1896 to Rio 2016.
+Each row is an athlete-event. The ID column can be used to uniquely identify athletes, since some athletes have the same name.
+
+athlete_events.csv contains 271116 rows and 15 columns. Each row corresponds to an individual athlete competing in an individual Olympic event (athlete-events). The columns are:
+
+ID - Unique number for each athlete
+Name - Athlete's name
+Sex - M or F
+Age - Integer
+Height - In centimeters
+Weight - In kilograms
+Team - Team name
+NOC - National Olympic Committee 3-letter code
+Games - Year and season
+Year - Integer
+Season - Summer or Winter
+City - Host city
+Sport - Sport
+Event - Event
+Medal - Gold, Silver, Bronze, or NA
+
+file noc regions:
+NOC (National Olympic Committee 3 letter code)
+Country name (matches with regions in map_data("world"))
+Notes
+
+weblink:
+
+https://www.kaggle.com/heesoo37/120-years-of-olympic-history-athletes-and-results?select=athlete_events.csv
+
+https://www.kaggle.com/heesoo37/120-years-of-olympic-history-athletes-and-results?select=noc_regions.csv
+
+***
+
+# REQUIRED LIBRARIES
+```{r}
+
+library("gganimate")
+library("data.table")
+library("knitr")
+library("gridExtra")
+library("tidyverse")
+library("plotly")
+
+```
+***
+Load the datasets
+# LOAD ATHLETES EVENTS DATA
+
+```{r}
+dataOlympics <- read_csv("athleteEvents.csv", col_types = cols(
+                   ID = col_character(),
+                   Name = col_character(),
+                   Sex = col_factor(levels = c("M","F")),
+                   Age =  col_integer(),
+                   Height = col_double(),
+                   Weight = col_double(),
+                   Team = col_character(),
+                   NOC = col_character(),
+                   Games = col_character(),
+                   Year = col_integer(),
+                   Season = col_factor(levels = c("Summer","Winter")),
+                   City = col_character(),
+                   Sport = col_character(),
+                   Event = col_character(),
+                   Medal = col_factor(levels = c("Gold","Silver","Bronze"))
+                 )
+)
+```
+
+
+```{r}
+glimpse(dataOlympics)
+```
+
+There are few missing values, changes are not required and will remove records with missing values in visualization for that category.
+
+
+```{r}
+head(dataOlympics)
+```
+
+We find 271116 observations, with 15 variables in this first data set. Now you will load a second data set that contains the NOCs (National Olympic Committees) information.
+
+```{r}
+# LOAD DATA MATCHING NOCs (NATIONAL OLYMPIC COMMITTEE) WITH COUNTRIES
+NOCs <- read_csv("nocRegions.csv", col_types = cols(
+                  NOC = col_character(),
+                  region = col_character()
+                ))
+glimpse(NOCs)
+head(NOCs)
+```
+***
+# General Analysis
+Has the number of athletes, countries, and events increased or decreased throughout time?
+
+We can answer this question with the data that we have in the first data set. we can create a visualization to identify how the participation of nations and athletes has changed, as well as events.
+
+```{r}
+# NUMBER OF NATIONS, ATHLETES AND AND EVENTS, WITHOUT ART COMPETITIONS
+numbers <- dataOlympics %>%
+  group_by(Year, Season) %>%
+  summarize(Nations = length(unique(NOC)), Athletes = length(unique(ID)), Events = length(unique(Event))
+  )
+
+numbers <- numbers %>%
+  mutate(gap= if(Year<1920) 1 else if(Year>=1920 & Year<=1936) 2 else 3)
+
+plotNations <- ggplot(numbers, aes(x=Year, y=Nations, group=interaction(Season,gap), color=Season)) +
+  geom_point(size=2) +
+  geom_line() +
+  scale_color_manual(values=c("chocolate","deepskyblue4")) +
+  labs(x = " ", y = "Nations", 
+       title="Nations, Athletes and Events", 
+       subtitle = "Olympic Games from 1896 to 2016")
+
+plotAthletes <- ggplot(numbers, aes(x=Year, y=Athletes, group=interaction(Season,gap), color=Season)) +
+  geom_point(size=2) +
+  geom_line() +
+  scale_color_manual(values=c("chocolate","deepskyblue4")) +
+  xlab("")
+
+plotEvents <- ggplot(numbers, aes(x=Year, y=Events, group=interaction(Season,gap), color=Season)) +
+  geom_point(size=2) +
+  geom_line() +
+  scale_color_manual(values=c("chocolate","deepskyblue4")) 
+  
+grid.arrange( plotNations, plotAthletes, plotEvents, ncol=1)
+```
+we can see how it has been increasing over time.
+
+***
+# Medal winners
+
+Which nations took home the most medals?
+
+we visualize the proportion of gold, silver, and bronze medals that each nation has accumulated. Let’s say we want to get the top 30.
+
+```{r}
+# THE TOTAL NUMBER OF MEDALS GIVEN TO EACH TEAM
+medalCounts <- dataOlympics %>% filter(!is.na(Medal))%>% 
+  group_by(NOC, Medal, Event, Games) %>%
+  summarize(isMedal=1)
+
+medalCounts <-  medalCounts %>% 
+  group_by(NOC, Medal) %>%
+  summarize(Count= sum(isMedal))
+
+medalCounts <- left_join(medalCounts, NOCs, by= "NOC" )
+
+medalCounts <- medalCounts %>% 
+  mutate (Team = region)
+
+medalCounts <- medalCounts %>% select( Medal, Team, Count)
+
+# ORDERING TEAM BY TOTAL MEDAL COUNT
+
+levelsTeam <- medalCounts %>%
+  group_by(Team) %>%
+  summarize(Total=sum(Count)) %>%
+  arrange(desc(Total)) %>%
+  select(Team) %>%
+  slice(30:1)
+
+medalCounts$Team <- factor(medalCounts$Team, levels=levelsTeam$Team)
+
+medalCounts <- medalCounts %>% filter(Team != "NA")
+
+# PLOT MEDAL COUNTS
+
+ggplot(medalCounts, aes(x=Team, y=Count, fill=Medal)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(values=c("gold3","gray64","sienna")) +
+  labs(x = "Nations", y = "Count", 
+       title="Top 30 - Nations with the most medals won in history", 
+       subtitle = "Olympic Games from 1896 to 2016")
+
+```
+we can see that the USA, Russia, and Germany are the countries that lead the top.
+
+***
+
+Which nations took home the most medals? — Animated Plot
+
+an attractive way to visualize what has been previously obtained is with an animated plot, which can show in detail over the years the medals obtained by each nation, let’s say that for this you only need the top 10.
+
+```{r}
+# NUMBER OF MEDALS GIVEN TO EACH TEAM
+
+medalCounts <- dataOlympics %>% filter(!is.na(Medal))%>% 
+  group_by(NOC, Medal, Event, Games, Year) %>%
+  summarize(isMedal=1)
+
+medalCounts <-  medalCounts %>% 
+  group_by(NOC, Medal, Year) %>%
+  summarize(Count= sum(isMedal))
+
+medalCounts <- left_join(medalCounts, NOCs, by= "NOC" )
+
+medalCounts <- medalCounts %>% 
+  mutate (Team = region)
+medalCounts <- medalCounts %>% select( Medal, Team, Count, Year)
+# ORDERING TEAM BY TOTAL MEDAL COUNT
+levelsTeam <- medalCounts %>%
+  group_by(Team) %>%
+  summarize(Total=sum(Count)) %>%
+  arrange(desc(Total)) %>%
+  select(Team) %>%
+  slice(10:1)
+
+medalCounts$Team <- factor(medalCounts$Team, levels=levelsTeam$Team)
+
+medalCounts <- medalCounts %>% filter(Team != "NA")
+
+# ANIMATED PLOT MEDAL COUNT
+ 
+plotMedalsAnim<- ggplot(medalCounts, aes(x=Team, y=Count, fill=Medal)) +
+  labs(x = "Nations", y = "Count", 
+       title='Top 10 - Comparison over time, nations with the most medals', 
+       subtitle = 'Olympic Games from 1896 to 2016 - Year: {frame_time}')  +
+  transition_time(Year)+
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(values=c("gold3","gray64","sienna"))
+  
+animate(plotMedalsAnim,fps=2,renderer = ffmpeg_renderer(format = "webm"))
+
+```
+
+we loaded the gganimate library for this.
+
+***
+
+View the map to see which countries won the most medals
+
+Another way to visualize how many accumulated medals each nation has could be through a map. This will also provide a visual overview of the entire globe in a general.
+```{r}
+# MAP NATIONS WITH MOST MEDALS WON
+medalCounts <- dataOlympics %>% filter(!is.na(Medal))%>% 
+  group_by(NOC, Medal, Event, Games) %>%
+  summarize(isMedal=1)
+
+medalCounts <-  medalCounts %>% 
+  group_by(NOC, Medal) %>%
+  summarize(Count= sum(isMedal))
+
+medalCounts <- left_join(medalCounts, NOCs, by= "NOC" ) %>% 
+  select(region, NOC, Medal, Count)
+
+medalCounts <- medalCounts %>%
+  group_by(region) %>%
+  summarize(Total=sum(Count))
+
+data_regions <- medalCounts %>% 
+  left_join(NOCs,by="region") %>%
+  filter(!is.na(region))
+
+earth <- map_data("world")
+
+earth <- left_join(earth, data_regions, by="region")
+
+# PLOT MAP
+
+plotMapMedals <- ggplot(earth, aes(x = long, y = lat, group = group)) +
+  geom_polygon(aes(fill = Total, label= region)) +
+  labs(x = "", y = "", 
+       title="Map of nations with the most medals won", 
+       subtitle = "Olympic Games from 1896 to 2016") +
+  guides(fill=guide_colourbar(title="medals")) +
+  scale_fill_gradient(low="white",high="gold3")
+plotMapMedals
+
+ggplotly(plotMapMedals)
+
+```
+
+we get a map , where we can see the countries that until the Rio 2016 games have not obtained a single medal, such as Honduras, Bolivia, and Albanie, for example.
+
+***
+# Analysis By Sex
+
+Participation of male and female athletes over time
+
+```{r}
+df <- dataOlympics %>%
+group_by(Season, Sex) %>%
+summarise(Count = n()) %>%
+mutate(Percentage = round(Count*100 / sum(Count)))
+```
+
+```{r}
+df %>%
+ggplot(aes(x=Season, y=Percentage, fill = Sex)) + geom_bar(stat='identity',position=position_dodge()) +
+ggtitle("Total number of transfers in a window(2007-2017)") +
+geom_label(label=df$Percentage, position = position_dodge(0.9)) +
+theme_minimal()
+3
+```
+
+During the winter and the summer the percentage and women have remained the same.
+
+# By trend
+
+## Overall trend
+As the olympics progressed through the ages the number of people participating in it would have increased, which meant that the number of men and women participating in the olympics grew.
+```{r}
+dataOlympics %>%
+group_by(Year, Season) %>%
+summarise(NumberOfParticipants = n()) %>%
+ggplot(aes(x = Year, y = NumberOfParticipants, group = Season)) +
+geom_line(aes(color = Season)) +
+geom_point(aes(color = Season)) +
+labs(x = "Year", y = "Number of Participants", title = "Number of participants in the olympics overtime")+
+theme_minimal()
+```
+The number of participants in the olympics have grown overtime. It is also obvious that the number of participants in the summer olympics are more than that of the winter olympics.
+
+## Trend of sex ratio
+
+```{r}
+groupMale <- dataOlympics %>%
+filter(Sex == "M") %>%
+group_by(Year, Season) %>%
+summarise(Number_Of_Men = n())
+```
+```{r}
+groupFemale <- dataOlympics %>%
+filter(Sex == "F") %>%
+group_by(Year, Season) %>%
+summarise(Number_Of_Women = n())
+```
+```{r}
+group <- groupMale %>%
+left_join(groupFemale) %>%
+mutate(Sex_Ratio = Number_Of_Men/Number_Of_Women)
+```
+
+```{r}
+p1 <- group %>%
+ggplot(aes(x = Year, y= Sex_Ratio, group = Season)) +
+geom_line(aes(color = Season)) +
+geom_point(aes(color = Season)) +
+  labs(x = "Year", y = "Sex Ratio", title = "Sex Ratio in Olympics through the years") +
+theme_minimal()
+p2 <- group %>%
+filter(Year>1927) %>%
+ggplot(aes(x = Year, y= Sex_Ratio, group = Season)) +
+geom_line(aes(color = Season)) +
+geom_point(aes(color = Season)) +
+labs(x = "Year", y = "Sex Ratio", title = "Sex Ratio in Olympics through the years after 1927") +
+theme_minimal()
+cowplot::plot_grid(p1,p2, ncol = 1,
+align = 'h', axis = 'l')
+```
+When the olympics started no women participated in the Olympics. In 1900 women started participating in the olympics. As years passed the sex ratio i.e. the ratio of men to women became smaller. After 2000 the ratio started to move towards 1, which means that the olympics now are more diverse than they used to be,
+which is great.
+
+***
+# Analysis by Age
+
+Age is something might have changed from the olymipics started. Hypothesis: The participants during the1900 of the olympics had a median age greater than the median age of the participants during the 2000’s.
+
+## Age density plots
+
+```{r}
+dataOlympics$Age[is.na(dataOlympics$Age)] <- median(dataOlympics$Age, na.rm = T)
+
+cat("The median age of the athletes in the modern olympics is", median(dataOlympics$Age))
+```
+
+```{r}
+cat("The median age of the male athletes in the modern olympics is", median(dataOlympics$Age[dataOlympics$Sex == "M"]))
+
+```
+
+```{r}
+cat("The median age of the female athletes in the modern olympics is", median(dataOlympics$Age[dataOlympics$Sex == "F"]))
+
+```
+```{r}
+# Filling the missing ages with median values.
+
+p1 <- dataOlympics %>%
+      ggplot(aes(x = Age)) +
+      geom_density(color = "black", fill = "tomato") +
+      labs(x = "Age", title = "Distribution of Age") +
+      theme_minimal()
+
+p2 <- dataOlympics %>%
+      ggplot(aes(x=Age, fill=Sex)) +
+      geom_density(alpha=0.4) +
+      labs(x = "Age", title = "Distribution of Age by Sex") +
+      theme_minimal()
+
+cowplot::plot_grid(p1,p2, ncol = 1, 
+          align = 'h', axis = 'l')
+```
+***
+
+Age of athletes over the years.
+
+```{r}
+dataOlympics %>%
+  group_by(Year, Sex) %>%
+  summarise(Median_Age = median(Age)) %>%
+  ggplot(aes(x = Year, y = Median_Age, Group = Sex)) +
+  geom_line(aes(color = Sex)) +
+  geom_point(aes(color = Sex)) + 
+  labs( x = "Year", y = "Medain age of Athletes", title = "Median age of Male and Female athletes over the years")+
+  theme_minimal()
+```
+
+The median age of men and women participating in the olymipics has increased a bit after the 1980’s.
+
+***
+#Analysis by Team:
+Teams here refer to the countries and the different atletic clubs that have participated in the olympics over the years.
+
+
+
+```{r}
+cat("The total number of teams that have paricipated in the olympics are", length(unique(dataOlympics$Team)))
+
+```
+```{r}
+atheletes <- dataOlympics %>%
+              left_join(NOCs, by = "NOC")
+```
+We have now joined athletes dataset with the regions dataset. I would like to analyze the dataset based on the National Olympics Committee rather than the teams.
+
+
+```{r}
+  cat("The total number of National Olympics Committees that have paricipated in the olympics are", length(unique(NOCs$region)))
+
+```
+#The 1976 and 1980 Olympic Boycott.
+
+
+```{r}
+
+atheletes %>%
+  group_by(Year, Season) %>%
+  summarise(NoOfCountries = length(unique(region))) %>%
+  ggplot(aes(x = Year, y = NoOfCountries, group = Season)) +
+  geom_line(aes(color = Season)) +
+  geom_point(aes(color = Season)) +
+  labs(x = "Year", y = "Number of countries participated", title = "Number of countries that participated in the Olympics") +
+  theme_minimal()
+
+```
+The number of countries that participated in the olymics have seen a steady increase over time. But, in 1976 and 1980 the number has seen a sharp decrease.Due to boycott.
+
+***
+# India in OLympics
+
+## Filter India's Athletes
+
+```{r}
+
+dataOlympics %>%
+filter(Team == 'India') %>%
+distinct(Season, Year, Event, Medal) %>%
+group_by(Season, Medal = fct_explicit_na(Medal)) %>%
+summarize(Total = length(Medal)) %>%
+ggplot(aes(Medal, Total)) +
+geom_bar(stat = "identity", aes(fill=Medal)) +
+ylab("Total") + 
+xlab("Types") + 
+ggtitle("India Medal in Olympics, from Athens 1896 to Rio 2016") +
+geom_label(aes(label=Total)) +
+facet_grid(~Season) + 
+scale_y_continuous(trans = "log10")
+```
+
+
+## Men x Women participation
+
+```{r}
+
+dataOlympics %>%
+filter(Team == 'India') %>%
+distinct(Season, Year, Event, Sex, Medal) %>%
+group_by(Season, Sex, Medal = fct_explicit_na(Medal)) %>%
+summarize(Total = length(Medal)) %>%
+ggplot(aes(Medal, Total)) +
+geom_bar(stat = "identity", aes(fill=Medal)) +
+ylab("Total") + 
+xlab("Types") + 
+ggtitle("Group By Sex") +
+geom_label(aes(label=Total)) +
+facet_grid(Season ~ Sex) + 
+scale_y_continuous(trans = "log10")
+
+```
+
+***
+# Height and weight of athletes
+
+## Data completeness
+
+```{r}
+
+# Check data availability
+dataOlympics %>% group_by(Year, Sex) %>%
+  summarize(Present = length(unique(ID[which(!is.na(Height) & !is.na(Weight))])),
+            Total = length(unique(ID))) %>%
+  mutate(Proportion = Present/Total) %>%
+  ggplot(aes(x=Year, y=Proportion, group=Sex, color=Sex)) +
+  geom_point() +
+  geom_line() +
+  scale_color_manual(values=c("darkblue","red"))  +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title="Height/Weight data completeness from each Olympiad")
+
+```
+
+There was a dramatic increase in data completeness starting in 1960, reaching 86% for women and 90% for men.
+For all of the Games after this point, data completeness remained above 85% except for 1992, where completeness dips down to 80% for unclear reasons. 
+
+
+In light of this, We limited the remainder of this data exploration to Games from 1960 onward, which includes a total of 15 Olympiads spread over a 56 year period.
+
+```{r}
+# Remove missing Height/Weight data and limit to years from 1960 onward
+dataOlympics <- dataOlympics%>% filter(!is.na(Height), !is.na(Weight), Year > 1959) 
+```
+
+The next two plots show trends in the heights and weights of Olympic athletes over time, with the data grouped by sex.
+
+## Athlete height over time
+
+```{r}
+
+dataOlympics%>% ggplot(aes(x=as.factor(Year), y=Height, fill=Sex)) +
+  geom_boxplot(alpha=0.75) +
+  xlab("Olympiad Year") + ylab("Height (cm)") +
+  scale_fill_manual(values=c("blue","red"))
+
+```
+
+## Athlete weight over time
+
+```{r}
+
+dataOlympics %>% ggplot(aes(x=as.factor(Year), y=Weight, fill=Sex)) +
+  geom_boxplot(alpha=0.75) +
+  xlab("Olympiad Year") + ylab("Weight (kg)") +
+  scale_fill_manual(values=c("blue","red"))
+
+```
+
+These plots show that for both men and women, height and weight has increased gradually over the history of the Games. However, these plots could be hiding important variation since different body types are favored in different events. 
+
+In most sports this means taller and heavier, but in a few sports such as gymnastics, athletes have become smaller.
+
+***
+
+
+
+
